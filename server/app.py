@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+from sqlalchemy.exc import IntegrityError # sqlalchemy.exc for db level exceptions
 from models import db, Restaurant, RestaurantPizza, Pizza
 from flask_migrate import Migrate
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, jsonify
 from flask_restful import Api, Resource
 import os
 
@@ -23,6 +24,128 @@ api = Api(app)
 @app.route("/")
 def index():
     return "<h1>Code challenge</h1>"
+
+class Restaurants(Resource):
+
+    def get(self):
+
+        restaurants = [restaurant.to_dict(only=('address', 'id', 'name',)) for restaurant in Restaurant.query.all()]
+
+        if not restaurants:
+            return jsonify({'error': 'Error retrieving restaurants Or No restaurants available'}), 500
+
+        return make_response(restaurants, 200)
+    
+class RestaurantById(Resource):
+
+    def get(self, id):
+
+        if not id:
+            return {'error': 'Restaurant not found'}, 404
+
+        restaurant = Restaurant.query.get(id)
+
+        if not restaurant:
+            return jsonify({'error': 'Restaurant not found'}), 404
+
+        return make_response(restaurant.to_dict(), 200)
+    
+    def delete(self, id):
+
+        if not id:
+            return {'error': 'Restaurant not found'}, 404
+        
+        restaurant = Restaurant.query.get(id)
+
+        if not restaurant:
+            return jsonify({'error': 'Restaurant not found'}), 404
+        
+        db.session.delete(restaurant)
+        db.session.commit()
+
+        return {}, 204
+    
+class Pizzas(Resource):
+
+    def get(self):
+
+        pizzas = [pizza.to_dict(only=('id', 'ingredients', 'name',)) for pizza in Pizza.query.all()]
+
+        if not pizzas:
+            return jsonify({'error': 'Error retrieving pizzas Or No pizzas available'}), 500
+
+        return make_response(pizzas, 200)
+
+class PizzaById(Resource):
+
+    def get(self, id):
+
+        if not id:
+            return {'error': 'Pizza ID Missing'}, 400
+
+        pizza = Pizza.query.get(id)
+
+        if not pizza:
+            return jsonify({'error': 'Pizza not found'}), 400
+
+        return make_response(pizza.to_dict(), 200)
+    
+class RestaurantPizzas(Resource):
+
+    def get(self):
+
+        restaurant_pizzas = [restaurant_pizza.to_dict() for restaurant_pizza in RestaurantPizza.query.all()]
+
+        if not restaurant_pizzas:
+            return {'error': 'Error retrieving restaurant_pizzas Or No restaurant_pizzas available'}, 500
+
+        return make_response(restaurant_pizzas, 200)
+    
+    def post(self):
+
+        data = request.get_json()
+
+        if not data:
+            return {"missing_fields": {"price": None, "pizza_id": None, "restaurant_id": None}}, 400
+
+        price = data.get('price')
+        pizza_id = data.get('pizza_id')
+        restaurant_id = data.get('restaurant_id')
+
+        errors = []
+        if not price:
+            errors.append('validation errors') # 'validation errors' to pass the test i.e if price is 0
+        if not pizza_id:
+            errors.append('Pizza_id is required')
+        if not restaurant_id:
+            errors.append('Restaurant_id is required')
+        if errors:
+            return {"errors": errors}, 400 # 422 # **No jsonify! returning a Response object (jsonify(...)) isn't serializable in flask_restful.
+        
+        try:
+            new_restaurant_pizza = RestaurantPizza( 
+                price=price,
+                pizza_id=pizza_id,
+                restaurant_id=restaurant_id
+            )
+
+            db.session.add(new_restaurant_pizza)
+            db.session.commit()
+
+        except ValueError:
+            return {"errors": ["validation errors"]}, 400 # 422
+        except (IntegrityError, KeyError) as e:
+            return {"error": str(e)}, 400 # No jsonified responses in Flask-RESTful # Works in plain Flask, but not in Flask-RESTful
+        except:
+            return {"errors": ["validation errors"]}, 400 # 422 # {"errors": "422: Unprocessable Entity"}
+        
+        return make_response(new_restaurant_pizza.to_dict(), 201)
+
+api.add_resource(Restaurants, '/restaurants', endpoint='/restaurants')
+api.add_resource(RestaurantById, '/restaurants/<int:id>', endpoint='/restaurantsbyid')
+api.add_resource(Pizzas, '/pizzas', endpoint='/pizzas')
+api.add_resource(PizzaById, '/pizzas/<int:id>', endpoint='/pizzasbyid')
+api.add_resource(RestaurantPizzas, '/restaurant_pizzas', endpoint='/restaurant_pizzas')
 
 
 if __name__ == "__main__":
